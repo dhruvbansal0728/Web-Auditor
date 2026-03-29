@@ -4,4 +4,13 @@ type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
-
+tasks:
+  - id: fix_alt_tags
+    description: "Add descriptive alt attributes to all images in gallery.html"
+    difficulty: easy
+  - id: fix_heading_hierarchy
+    description: "Fix heading structure so headings are sequential (no skipped levels)"
+    difficulty: medium
+  - id: create_sitemap
+    description: "Create a valid sitemap.xml that references all HTML pages"
+    difficulty: hard

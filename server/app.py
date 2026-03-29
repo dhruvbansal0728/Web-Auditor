@@ -38,7 +38,7 @@ except Exception as e:  # pragma: no cover
 try:
     from ..models import WebAuditorAction, WebAuditorObservation
     from .web_auditor_environment import WebAuditorEnvironment
-except ModuleNotFoundError:
+except ImportError:
     from models import WebAuditorAction, WebAuditorObservation
     from server.web_auditor_environment import WebAuditorEnvironment
 

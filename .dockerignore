@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+push_log.txt
+working_directory*/
