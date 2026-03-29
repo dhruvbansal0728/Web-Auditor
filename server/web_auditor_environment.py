@@ -1,5 +1,6 @@
 import os
 import shutil
+import tempfile
 import subprocess
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
@@ -98,7 +99,9 @@ class WebAuditorEnvironment(Environment):
         # Path references (assumes running from web_auditor directory boundary)
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.template_dir = os.path.join(base_dir, "template_site")
-        self.work_dir_base = os.path.join(base_dir, "working_directory")
+        # Use tempfile's cross-platform temporary directory for writable workspaces to avoid HF Spaces Permission Errors!
+        self.work_dir_base = os.path.join(tempfile.gettempdir(), "working_directory")
+
 
     def get_directory_structure(self, instance_work_dir) -> str:
         structure = []
