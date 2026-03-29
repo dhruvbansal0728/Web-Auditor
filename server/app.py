@@ -43,14 +43,8 @@ except ImportError:
     from server.web_auditor_environment import WebAuditorEnvironment
 
 
-# Create the app with web interface and README integration
-app = create_app(
-    WebAuditorEnvironment,
-    WebAuditorAction,
-    WebAuditorObservation,
-    env_name="web_auditor",
-    max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
-)
+# Create the FastAPI app - must pass env, action_cls, observation_cls per openenv-core API
+app = create_app(WebAuditorEnvironment, WebAuditorAction, WebAuditorObservation)
 
 
 def main():
