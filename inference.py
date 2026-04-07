@@ -5,9 +5,9 @@ import requests
 from openai import OpenAI
 
 # Required env variables as per Pre-Submission Checklist
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1")
-MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 # OpenAI-compatible client using HF_TOKEN and API_BASE_URL
 client = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
