@@ -1,0 +1,2 @@
+[console_scripts]
+server = web_auditor.server.app:main

@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: openenv-web_auditor
+Version: 0.1.0
+Summary: Web Auditor environment for OpenEnv
+Requires-Python: >=3.10
+Requires-Dist: openenv-core[core]>=0.2.2
+Requires-Dist: beautifulsoup4>=4.12.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: openai>=1.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
