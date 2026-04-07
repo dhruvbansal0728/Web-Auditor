@@ -47,31 +47,20 @@ class WebAuditorEnv(
     def _step_payload(self, action: WebAuditorAction) -> Dict:
         """
         Convert WebAuditorAction to JSON payload for step message.
-
-        Args:
-            action: WebAuditorAction instance
-
-        Returns:
-            Dictionary representation suitable for JSON encoding
         """
         return {
-            "message": action.message,
+            "command": action.command,
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[WebAuditorObservation]:
         """
         Parse server response into StepResult[WebAuditorObservation].
-
-        Args:
-            payload: JSON response data from server
-
-        Returns:
-            StepResult with WebAuditorObservation
         """
         obs_data = payload.get("observation", {})
         observation = WebAuditorObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
+            output=obs_data.get("output", ""),
+            current_directory_structure=obs_data.get("current_directory_structure", ""),
+            file_content=obs_data.get("file_content"),
             done=payload.get("done", False),
             reward=payload.get("reward"),
             metadata=obs_data.get("metadata", {}),
@@ -86,12 +75,6 @@ class WebAuditorEnv(
     def _parse_state(self, payload: Dict) -> State:
         """
         Parse server response into State object.
-
-        Args:
-            payload: JSON response from state request
-
-        Returns:
-            State object with episode_id and step_count
         """
         return State(
             episode_id=payload.get("episode_id"),
