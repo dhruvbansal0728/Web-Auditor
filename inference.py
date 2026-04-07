@@ -28,7 +28,7 @@ def main():
     print("=== Web Auditor Baseline Inference ===")
     print(f"Model: {MODEL_NAME}")
     print(f"API Base: {API_BASE_URL}")
-    print("[START] task=web_auditor", flush=True)
+    print(f"[START] task=web_auditor env=web_auditor model={MODEL_NAME}", flush=True)
 
     # Reset environment
     try:
@@ -75,9 +75,13 @@ def main():
             reward = new_obs.get("reward", 0.0)
             done = new_obs.get("done", False)
             meta = new_obs.get("metadata", {})
+            error_msg = new_obs.get("error", None)
             scores.append(reward)
+            
+            done_val = str(done).lower()
+            error_val = error_msg if error_msg else "null"
             print(f"Reward: {reward:.3f} | Task scores: {meta}")
-            print(f"[STEP] step={step_num + 1} reward={reward:.3f}", flush=True)
+            print(f"[STEP] step={step_num + 1} action={cmd} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
             history.append({"role": "user", "content": f"OBSERVATION: {json.dumps(new_obs)}"})
 
@@ -100,7 +104,9 @@ def main():
         print("No scores recorded.")
         final_score = 0.0
     
-    print(f"[END] task=web_auditor score={final_score:.3f} steps={len(scores)}", flush=True)
+    success_val = str(final_score >= 0.99).lower()
+    rewards_str = ",".join(f"{r:.2f}" for r in scores) if scores else "0.00"
+    print(f"[END] success={success_val} steps={len(scores)} score={final_score:.2f} rewards={rewards_str}", flush=True)
 
 if __name__ == "__main__":
     start = time.time()
