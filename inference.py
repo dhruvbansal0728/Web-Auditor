@@ -13,6 +13,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
 IMAGE_NAME = os.getenv("IMAGE_NAME") # Important for Phase 2!
+TASK_NAME = os.getenv("TASK_NAME", os.getenv("TASK_ID", "web_auditor"))
 
 SYSTEM_PROMPT = """You are a Webmaster AI agent. Your goal is to fix a broken HTML website.
 The working directory contains HTML files with these issues:
@@ -24,24 +25,21 @@ Output ONLY valid JSON with this schema (no markdown, no explanation):
 {"name": "execute_bash", "arguments": {"command": "your bash command here"}}
 """
 
-def log_start(task: str, env: str, model: str) -> None:
-    print(f"[START] task={task} env={env} model={model}", flush=True)
+def log_start(task: str) -> None:
+    print(f"[START] task={task}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    error_val = error if error else "null"
-    done_val = str(done).lower()
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
+def log_step(step: int, reward: float) -> None:
+    print(f"[STEP] step={step} reward={reward:.2f}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+def log_end(task: str, score: float, steps: int) -> None:
+    print(f"[END] task={task} score={score:.2f} steps={steps}", flush=True)
 
 async def main():
-    print("=== Web Auditor Baseline Inference ===")
-    print(f"Model: {MODEL_NAME}")
-    print(f"API Base: {API_BASE_URL}")
+    print("=== Web Auditor Baseline Inference ===", flush=True)
+    print(f"Model: {MODEL_NAME}", flush=True)
+    print(f"API Base: {API_BASE_URL}", flush=True)
 
-    log_start(task="web_auditor", env="web_auditor", model=MODEL_NAME)
+    log_start(task=TASK_NAME)
 
     scores = []
     success = False
@@ -97,7 +95,7 @@ async def main():
                     scores.append(reward)
                     steps_taken = step_num
                     
-                    log_step(step=step_num, action=cmd_single_line, reward=reward, done=done, error=error)
+                    log_step(step=step_num, reward=reward)
                     
                     history.append({"role": "user", "content": f"OBSERVATION: output={obs.output} files={obs.current_directory_structure}"})
 
@@ -118,9 +116,9 @@ async def main():
     except Exception as e:
         print(f"[DEBUG] Global execution error: {e}")
     finally:
-        print(f"\n=== FINAL SCORES ===")
+        print(f"\n=== FINAL SCORES ===", flush=True)
         final_score = scores[-1] if scores else 0.0
-        log_end(success=success, steps=steps_taken, score=final_score, rewards=scores)
+        log_end(task=TASK_NAME, score=final_score, steps=steps_taken)
 
 if __name__ == "__main__":
     start = time.time()
