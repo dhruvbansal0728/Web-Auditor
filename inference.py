@@ -1,127 +1,223 @@
+"""
+Inference Script for Web Auditor Environment
+Complies with the mandatory OpenEnv stdout format:
+
+[START] task=<task_name> env=<benchmark> model=<model_name>
+[STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+[END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+"""
+
 import asyncio
 import os
 import json
-import time
 from typing import List, Optional
+
 from openai import OpenAI
 
-from models import WebAuditorAction
-from client import WebAuditorEnv
+# ── Mandatory environment variables ──────────────────────────────────────────
+IMAGE_NAME   = os.getenv("IMAGE_NAME")                    # set by evaluator
+API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "dummy"
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+TASK_NAME    = os.getenv("TASK_NAME",    "fix_alt_tags")
+BENCHMARK    = os.getenv("BENCHMARK",    "web_auditor")
+SPACE_URL    = os.getenv("SPACE_URL",    "http://localhost:8000")
 
-# Required env variables as per Pre-Submission Checklist
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN")
-IMAGE_NAME = os.getenv("IMAGE_NAME") # Important for Phase 2!
-TASK_NAME = os.getenv("TASK_NAME", os.getenv("TASK_ID", "web_auditor"))
+# All 3 task IDs that must each produce an [END] line
+TASK_IDS = ["fix_alt_tags", "fix_heading_hierarchy", "create_sitemap"]
 
-SYSTEM_PROMPT = """You are a Webmaster AI agent. Your goal is to fix a broken HTML website.
-The working directory contains HTML files with these issues:
-1. Missing/empty alt attributes on images in gallery.html
-2. Broken heading hierarchy (h1 jumps to h4) in index.html
-3. Missing sitemap.xml
+MAX_STEPS = 5
+SUCCESS_SCORE_THRESHOLD = 0.5
 
-Output ONLY valid JSON with this schema (no markdown, no explanation):
+SYSTEM_PROMPT = """You are a Webmaster AI agent fixing a broken HTML website.
+The site has 3 problems:
+1. Images in gallery.html are missing alt attributes
+2. Headings in index.html skip levels (h1 -> h4)
+3. No sitemap.xml exists
+
+Execute bash commands to fix these issues. Respond ONLY with valid JSON:
 {"name": "execute_bash", "arguments": {"command": "your bash command here"}}
 """
 
-def log_start(task: str) -> None:
-    print(f"[START] task={task}", flush=True)
+# ── Log helpers ───────────────────────────────────────────────────────────────
 
-def log_step(step: int, reward: float) -> None:
-    print(f"[STEP] step={step} reward={reward:.2f}", flush=True)
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-def log_end(task: str, score: float, steps: int) -> None:
-    print(f"[END] task={task} score={score:.2f} steps={steps}", flush=True)
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    # Sanitise action: remove newlines so everything stays on one line
+    action_safe = action.replace("\n", " ").replace("\r", "")[:120]
+    print(
+        f"[STEP] step={step} action={action_safe} reward={reward:.2f} "
+        f"done={str(done).lower()} error={error_val}",
+        flush=True,
+    )
 
-async def main():
-    print("=== Web Auditor Baseline Inference ===", flush=True)
-    print(f"Model: {MODEL_NAME}", flush=True)
-    print(f"API Base: {API_BASE_URL}", flush=True)
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.2f} rewards={rewards_str}",
+        flush=True,
+    )
 
-    log_start(task=TASK_NAME)
+# ── Simple HTTP client (no Docker needed) ────────────────────────────────────
 
-    scores = []
-    success = False
-    client = None
+class SimpleHTTPClient:
+    """Talks to the FastAPI environment over plain HTTP."""
+
+    def __init__(self, base_url: str):
+        import requests as _requests
+        self._s  = _requests.Session()
+        self._url = base_url.rstrip("/")
+
+    def reset(self) -> dict:
+        r = self._s.post(f"{self._url}/reset", timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def step(self, command: str) -> dict:
+        r = self._s.post(
+            f"{self._url}/step",
+            json={"action": {"command": command}},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def close(self):
+        self._s.close()
+
+
+# ── One episode for a single task ────────────────────────────────────────────
+
+async def run_task(task_id: str, client: OpenAI) -> None:
+    """Run one episode and emit [START] … [STEP]… [END] for task_id."""
+
+    rewards: List[float] = []
     steps_taken = 0
+    score = 0.0
+    success = False
+    env = None
+
+    log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        # Avoid instant global crash if token isn't provided
-        client = OpenAI(api_key=HF_TOKEN or "dummy_key", base_url=API_BASE_URL)
-        
-        env = await WebAuditorEnv.from_docker_image(IMAGE_NAME)
-        
-        try:
-            result = await env.reset()
-            obs = result.observation
-            
-            print(f"Initial reward: {result.reward or 0.0}")
-            print(f"Directory:\n{obs.current_directory_structure}")
+        # ── Connect to environment ──────────────────────────────────────────
+        if IMAGE_NAME:
+            # Evaluator provides a docker image
+            from client import WebAuditorEnv
+            from models import WebAuditorAction
+            env_docker = await WebAuditorEnv.from_docker_image(IMAGE_NAME)
+        else:
+            env_docker = None
 
-            history = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"OBSERVATION: output={obs.output} files={obs.current_directory_structure}"}
-            ]
+        http_client = SimpleHTTPClient(SPACE_URL) if not env_docker else None
 
-            for step_num in range(1, 11):
-                if result.done:
-                    break
+        # ── Reset ───────────────────────────────────────────────────────────
+        if env_docker:
+            from models import WebAuditorAction
+            result = await env_docker.reset()
+            obs_dir  = result.observation.current_directory_structure
+            obs_out  = result.observation.output
+        else:
+            data     = http_client.reset()
+            obs      = data.get("observation", {})
+            obs_dir  = obs.get("current_directory_structure", "")
+            obs_out  = obs.get("output", "")
 
-                try:
-                    response = client.chat.completions.create(
-                        model=MODEL_NAME,
-                        messages=history,
-                        max_tokens=256,
-                        temperature=0.0,
-                    )
-                    agent_reply = response.choices[0].message.content.strip()
-                    history.append({"role": "assistant", "content": agent_reply})
+        messages = [
+            {"role": "system",  "content": SYSTEM_PROMPT},
+            {"role": "user",    "content": f"Task: {task_id}\nFiles:\n{obs_dir}\nOutput:\n{obs_out}"},
+        ]
 
-                    clean = agent_reply.replace("```json", "").replace("```", "").strip()
-                    action_data = json.loads(clean)
-                    cmd = action_data.get("arguments", {}).get("command", "echo no-op")
-                    
-                    cmd_single_line = cmd.replace('\n', '\\n').replace('\r', '')
+        # ── Steps ───────────────────────────────────────────────────────────
+        for step_num in range(1, MAX_STEPS + 1):
+            steps_taken = step_num
+            error_msg: Optional[str] = None
+            command = "ls"
 
-                    # Execute
-                    result = await env.step(WebAuditorAction(command=cmd))
-                    obs = result.observation
-                    
-                    reward = result.reward or 0.0
-                    done = result.done
-                    error = None
-                    
-                    scores.append(reward)
-                    steps_taken = step_num
-                    
-                    log_step(step=step_num, reward=reward)
-                    
-                    history.append({"role": "user", "content": f"OBSERVATION: output={obs.output} files={obs.current_directory_structure}"})
-
-                except Exception as step_exc:
-                    print(f"Step {step_num} error: {step_exc}")
-                    break
-
-            if scores:
-                final_score = scores[-1]
-                success = final_score >= 0.99
-
-        finally:
             try:
-                await env.close()
-            except Exception as e:
-                print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
+                completion = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages,
+                    max_tokens=200,
+                    temperature=0.0,
+                )
+                reply = (completion.choices[0].message.content or "").strip()
+                messages.append({"role": "assistant", "content": reply})
+
+                # Parse JSON command
+                clean = reply[reply.find("{"):reply.rfind("}")+1] if "{" in reply else ""
+                command = json.loads(clean).get("arguments", {}).get("command", "ls")
+            except Exception as parse_err:
+                error_msg = str(parse_err)[:80]
+
+            # Execute step
+            try:
+                if env_docker:
+                    from models import WebAuditorAction
+                    result  = await env_docker.step(WebAuditorAction(command=command))
+                    reward  = float(result.reward or 0.0)
+                    done    = bool(result.done)
+                    obs_out = result.observation.output
+                    obs_dir = result.observation.current_directory_structure
+                else:
+                    data    = http_client.step(command)
+                    reward  = float(data.get("reward") or 0.0)
+                    done    = bool(data.get("done", False))
+                    obs     = data.get("observation", {})
+                    obs_out = obs.get("output", "")
+                    obs_dir = obs.get("current_directory_structure", "")
+            except Exception as step_err:
+                reward    = 0.0
+                done      = False
+                error_msg = str(step_err)[:80]
+
+            rewards.append(reward)
+            log_step(step=step_num, action=command, reward=reward, done=done, error=error_msg)
+
+            messages.append({"role": "user", "content": f"Output:\n{obs_out}"})
+
+            if done:
+                break
+
+        # Score = last reward (already in [0,1] from environment)
+        score   = max(0.0, min(1.0, rewards[-1] if rewards else 0.0))
+        success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as e:
-        print(f"[DEBUG] Global execution error: {e}")
+        print(f"[DEBUG] run_task({task_id}) error: {e}", flush=True)
+
     finally:
-        print(f"\n=== FINAL SCORES ===", flush=True)
-        final_score = scores[-1] if scores else 0.0
-        log_end(task=TASK_NAME, score=final_score, steps=steps_taken)
+        # Clean up
+        if env_docker is not None:
+            try:
+                if asyncio.iscoroutinefunction(getattr(env_docker, "close", None)):
+                    await env_docker.close()
+                else:
+                    env_docker.close()
+            except Exception:
+                pass
+        if http_client is not None:
+            try:
+                http_client.close()
+            except Exception:
+                pass
+
+        # Mandatory [END] line
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+
+# ── Main: run all 3 tasks sequentially ───────────────────────────────────────
+
+async def main() -> None:
+    client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
+
+    for task_id in TASK_IDS:
+        await run_task(task_id, client)
+
 
 if __name__ == "__main__":
-    start = time.time()
     asyncio.run(main())
-    elapsed = time.time() - start
-    print(f"\nTotal runtime: {elapsed:.1f}s")
