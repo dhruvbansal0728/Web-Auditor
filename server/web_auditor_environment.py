@@ -170,7 +170,7 @@ class WebAuditorEnvironment(Environment):
             file_content=file_content,
             done=done,
             reward=total_score,
-            metadata={"step": self._state.step_count, "task_1": t1, "task_2": t2, "task_3": t3}
+            metadata={"step": self._state.step_count, "fix_alt_tags": t1, "fix_heading_hierarchy": t2, "create_sitemap": t3}
         )
 
     @property
