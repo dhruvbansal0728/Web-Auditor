@@ -6,14 +6,23 @@ app: server.app:app
 port: 8000
 tasks:
   - id: fix_alt_tags
+    name: Fix Alt Tags
     description: "Add descriptive alt attributes to all images in gallery.html"
     difficulty: easy
-    score: 0.33
+    grader: server.web_auditor_environment.fix_alt_tags_grader
+    max_steps: 10
+    score_range: [0.01, 0.99]
   - id: fix_heading_hierarchy
+    name: Fix Heading Hierarchy
     description: "Fix heading structure so headings are sequential (no skipped levels)"
     difficulty: medium
-    score: 0.33
+    grader: server.web_auditor_environment.fix_heading_hierarchy_grader
+    max_steps: 10
+    score_range: [0.01, 0.99]
   - id: create_sitemap
+    name: Create Sitemap
     description: "Create a valid sitemap.xml that references all HTML pages"
     difficulty: hard
-    score: 0.34
+    grader: server.web_auditor_environment.create_sitemap_grader
+    max_steps: 10
+    score_range: [0.01, 0.99]
